@@ -1,5 +1,4 @@
-// NEW: Import useRef and ActivityIndicator
-import React, { useState, useRef } from "react"; 
+import React, { useState, useRef, useEffect } from "react"; 
 import {
   View,
   Text,
@@ -9,34 +8,68 @@ import {
   KeyboardAvoidingView,
   Platform,
   StatusBar,
-  ActivityIndicator, // NEW: Added for the typing indicator
+  ActivityIndicator,
+  Dimensions,
+  StyleSheet,
+  Image,
 } from "react-native";
+// 1. Import Axios
+import axios from 'axios';
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
-import { useAppTheme } from "../android/app/utils/theme";
 
-const Coach = () => {
+// --- CONFIGURATION ---
+// WARNING: In a production app, restrict this key in Google Cloud Console to your Android/iOS bundle IDs.
+const GEMINI_API_KEY = "AIzaSyD9RoOMRoqbhHgVRRyUf7nwR0W3677OMm0"; // Your key
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+// Define the bot's persona (System Instruction)
+// NOTE: This persona is currently UNUSED because the API call is simplified and does not send generationConfig.
+const ECOBUDDY_PERSONA = "You are EcoBuddy, a friendly, encouraging, and knowledgeable AI assistant focused on helping the user track and reduce their carbon footprint. Your responses should be short, practical, and enthusiastic, using emojis related to nature and sustainability (🌱, 🌳, 🌍). Never use overly complex technical jargon.";
+
+// --- PROFESSIONAL THEME CONFIGURATION ---
+const THEME = {
+  primary: "#2E7D32", // Forest Green
+  primaryLight: "#E8F5E9", // Light Mint
+  accent: "#FFB74D", // Soft Orange for highlights
+  background: "#F4F6F4", // Very light grey/green tint
+  surface: "#FFFFFF",
+  textMain: "#1A1A1A",
+  textSecondary: "#757575",
+  border: "#E0E0E0",
+  shadow: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 3,
+  }
+};
+
+const Coach = ({ user, onLogout }) => {
   const insets = useSafeAreaInsets();
-  const { colors, isDark } = useAppTheme();
-  
-  // NEW: Add a state for loading and a ref for scrolling
-  const [isLoading, setIsLoading] = useState(false);
   const scrollViewRef = useRef();
-
+  
+  // State Management
+  const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
+  
+  // Initial Chat Data & History
   const [messages, setMessages] = useState([
     {
       id: 1,
-      text: "Hello Sarah! 🌱 I'm EcoBuddy, your personal carbon companion.",
+      text: "Hello Sarah! 🌱 I'm EcoBuddy. Ready to make today greener?",
       isBot: true,
       timestamp: "9:30 AM",
+      role: 'model', 
     },
     {
       id: 2,
-      text: "Today you've used 4.2 kg CO₂, 18% below your weekly average. Great job! 🎉",
+      text: "You've saved 4.2 kg CO₂ today! That's like planting 2 trees. 🌳",
       isBot: true,
       timestamp: "9:30 AM",
+      role: 'model', 
     },
   ]);
 
@@ -44,247 +77,224 @@ const Coach = () => {
     {
       id: 1,
       category: "Travel",
-      tip: "You traveled 8 km by bus today. Try walking 1 short trip tomorrow!",
-      icon: "trending-up",
-      color: colors.blue,
+      title: "Walk vs Drive",
+      tip: "8km by bus saved you 1.2kg CO₂.",
+      icon: "walk",
+      color: "#43A047",
     },
     {
       id: 2,
       category: "Diet",
-      tip: "Try one vegetarian meal to reduce 1.6kg CO₂.",
-      icon: "target",
-      color: colors.green,
+      title: "Veggie Meal",
+      tip: "Try a meat-free lunch today.",
+      icon: "food-apple-outline",
+      color: "#FB8C00",
     },
     {
       id: 3,
       category: "Energy",
-      tip: "Energy usage decreased by 12% this week. Keep going!",
-      icon: "star-shooting",
-      color: colors.yellow,
+      title: "Power Down",
+      tip: "Unplug devices not in use.",
+      icon: "lightning-bolt-outline",
+      color: "#FDD835",
     },
   ];
 
   const quickReplies = [
-    "How can I reduce my carbon footprint?",
-    "Show my weekly progress",
-    "Give me today's challenge",
-    "Tips for sustainable travel",
+    "📉 Reduce my footprint",
+    "📊 Weekly Progress",
+    "🔥 Today's Challenge",
+    "🚲 Sustainable Travel",
   ];
 
-  // NEW: The handleSendMessage function is now async to handle the API call
+  // Scroll to bottom helper
+  const scrollToBottom = () => {
+    // Only scroll after state update triggers rendering
+    setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  };
+
+  // --- BACKEND LOGIC (DIRECT GEMINI API CALL) ---
   const handleSendMessage = async () => {
     if (!message.trim()) return;
 
     const userMessage = {
-      id: messages.length + 1,
+      id: Date.now(),
       text: message,
       isBot: false,
       timestamp: new Date().toLocaleTimeString("en-US", {
         hour: "numeric",
         minute: "2-digit",
       }),
+      role: 'user', 
     };
 
-    // Add user message and set loading
+    // 1. Add user message immediately to UI and local history
     setMessages((prev) => [...prev, userMessage]);
     setMessage("");
     setIsLoading(true);
-    
-    // NEW: Scroll to bottom after sending
-    setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+    // Scroll now to show the input bubble
+    scrollToBottom();
 
-    // --- NEW: API Call ---
     try {
-      // ❗❗❗ IMPORTANT ❗❗❗
-      // Replace this with your computer's IP address
-      const response = await fetch("http://100.115.130.16:3000/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ text: userMessage.text }),
+      // --- REGRESSION WARNING ---
+      // This simplified structure only sends the current message and loses all conversational context.
+      // The ECOBUDDY_PERSONA is also currently unused as 'generationConfig' is removed.
+      
+      const response = await axios({
+        url: GEMINI_URL,
+        method: "post",
+        data: {
+          contents: [
+            {
+              parts: [
+                {
+                  text: userMessage.text // Only sends the current question
+                }
+              ]
+            }
+          ]
+        }
       });
 
-      if (!response.ok) {
-        throw new Error("Something went wrong");
+      // 4. Parse the specific Gemini Response structure
+      const botReply = response?.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (!botReply) {
+         throw new Error("Gemini returned an empty or malformed response.");
       }
 
-      const data = await response.json(); // Gets { "reply": "..." }
-      const botReply = data.reply;
-
       const botMessage = {
-        id: messages.length + 2, // Use +2 because we already added the user message
+        id: Date.now() + 1,
         text: botReply,
         isBot: true,
         timestamp: new Date().toLocaleTimeString("en-US", {
           hour: "numeric",
           minute: "2-digit",
         }),
+        role: 'model', // Added role
       };
       
+      // 5. Add bot message to state
       setMessages((prev) => [...prev, botMessage]);
 
     } catch (error) {
-      console.error(error);
-      // Show an error message in the chat
+      
+      // --- START OF IMPROVED ERROR LOGGING ---
+      console.error("--- GEMINI REQUEST FAILED ---");
+      console.error("HTTP Status:", error.response?.status);
+      console.error("Response Data:", error.response?.data);
+      console.error("Axios Message:", error.message);
+      
+      let errorMessageText = "I'm having trouble connecting to the nature grid. 🍃 Please check your internet connection or API key status.";
+      
+      if (error.response?.data?.error?.message) {
+         // Use the specific message provided by the Gemini API
+         errorMessageText = `API Error: ${error.response.data.error.message}`;
+      } else if (error.response?.status === 400) {
+         errorMessageText = "Request Error (400): Malformed data sent to the API. Check your 'contents' array structure.";
+      } else if (error.response?.status === 403) {
+         errorMessageText = "Authentication Error (403): API key is invalid or restricted. Check your key!";
+      }
+      // --- END OF IMPROVED ERROR LOGGING ---
+
       const errorMessage = {
-        id: messages.length + 2,
-        text: "Sorry, I'm having trouble connecting right now. 😔",
+        id: Date.now() + 2,
+        text: errorMessageText,
         isBot: true,
         timestamp: new Date().toLocaleTimeString("en-US", {
           hour: "numeric",
           minute: "2-digit",
         }),
+        role: 'model',
       };
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
-      // NEW: Stop loading and scroll to bottom
       setIsLoading(false);
-      setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+      // Final scroll to ensure typing indicator and response are visible
+      scrollToBottom();
     }
-    // --- End of API Call ---
   };
 
-  // NEW: This function is now DELETED. 
-  // All this logic is on your server.
-  // const generateBotReply = (msg) => { ... };
+  // --- RENDER FUNCTIONS ---
 
   const renderHeader = () => (
-    <View
-      style={{
-        paddingHorizontal: 20,
-        paddingTop: 10,
-        paddingBottom: 20,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-        marginTop: insets.top,
-      }}
-    >
-      <View style={{ flexDirection: "row", alignItems: "center" }}>
-        <View
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 20,
-            backgroundColor: colors.greenLight,
-            justifyContent: "center",
-            alignItems: "center",
-            marginRight: 12,
-          }}
-        >
-          <MaterialCommunityIcons
-            name="robot-outline"
-            size={24}
-            color={colors.green}
-          />
+    <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+      <View style={styles.headerContent}>
+        <View style={styles.avatarContainer}>
+          <MaterialCommunityIcons name="leaf" size={24} color={THEME.surface} />
         </View>
         <View>
-          <Text style={{ fontSize: 18, fontWeight: "600", color: colors.primary }}>
-            EcoBuddy
-          </Text>
-          <Text style={{ fontSize: 14, color: colors.success }}>
-            Online • Ready to help! 🌿
-          </Text>
+          <Text style={styles.headerTitle}>EcoBuddy</Text>
+          <View style={styles.statusContainer}>
+            <View style={styles.statusDot} />
+            <Text style={styles.headerSubtitle}>Active • Tracking CO₂</Text>
+          </View>
         </View>
       </View>
+      <TouchableOpacity style={styles.iconButton} onPress={onLogout}>
+        <MaterialCommunityIcons name="logout" size={24} color={THEME.textMain} />
+      </TouchableOpacity>
     </View>
   );
 
   const renderDailyTips = () => (
-    <View style={{ paddingHorizontal: 20, paddingVertical: 16 }}>
-      <Text
-        style={{
-          fontSize: 16,
-          fontWeight: "600",
-          color: colors.primary,
-          marginBottom: 12,
-        }}
-      >
-        Today's Insights 💡
-      </Text>
-      {dailyTips.map((tip) => (
-        <TouchableOpacity
-          key={tip.id}
-          style={{
-            backgroundColor: colors.surface,
-            borderRadius: 16,
-            padding: 16,
-            borderWidth: 1,
-            borderColor: colors.border,
-            marginBottom: 12,
-          }}
-        >
-          <View style={{ flexDirection: "row" }}>
-            <View
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 16,
-                backgroundColor: `${tip.color}20`,
-                justifyContent: "center",
-                alignItems: "center",
-                marginRight: 12,
-              }}
-            >
-              <MaterialCommunityIcons name={tip.icon} size={18} color={tip.color} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 12, color: tip.color }}>{tip.category}</Text>
-              <Text style={{ fontSize: 14, color: colors.primary, lineHeight: 20 }}>
-                {tip.tip}
-              </Text>
-            </View>
-          </View>
-        </TouchableOpacity>
-      ))}
-    </View>
-  );
-
-  const renderMessage = (msg) => (
-    <View
-      key={msg.id}
-      style={{
-        paddingHorizontal: 20,
-        marginBottom: 16,
-        alignItems: msg.isBot ? "flex-start" : "flex-end",
-      }}
-    >
-      <View
-        style={{
-          maxWidth: "80%",
-          backgroundColor: msg.isBot ? colors.surface : colors.green,
-          padding: 14,
-          borderRadius: 18,
-        }}
-      >
-        <Text
-          style={{
-            fontSize: 14,
-            color: msg.isBot ? colors.primary : "#fff",
-            lineHeight: 20,
-          }}
-        >
-          {msg.text}
-        </Text>
+    <View style={styles.insightsContainer}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Daily Insights</Text>
+        <MaterialCommunityIcons name="lightbulb-on-outline" size={20} color={THEME.accent} />
       </View>
-      <Text style={{ fontSize: 12, color: colors.secondary, marginTop: 4 }}>
-        {msg.timestamp}
-      </Text>
+      
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 20 }}>
+        {dailyTips.map((tip) => (
+          <TouchableOpacity key={tip.id} style={styles.tipCard}>
+            <View style={[styles.tipIcon, { backgroundColor: tip.color + '20' }]}>
+              <MaterialCommunityIcons name={tip.icon} size={22} color={tip.color} />
+            </View>
+            <Text style={styles.tipCategory}>{tip.category}</Text>
+            <Text style={styles.tipText} numberOfLines={3}>{tip.tip}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
     </View>
   );
 
-  // NEW: A function to render the "is typing" bubble
+  const renderMessage = (msg) => {
+    if (msg.isBot) {
+      return (
+        <View key={msg.id} style={styles.botMessageRow}>
+            <View style={styles.botAvatarSmall}>
+                <MaterialCommunityIcons name="robot" size={16} color={THEME.primary} />
+            </View>
+            <View>
+                <View style={styles.botBubble}>
+                    <Text style={styles.botText}>{msg.text}</Text>
+                </View>
+                <Text style={styles.timestampLeft}>{msg.timestamp}</Text>
+            </View>
+        </View>
+      );
+    }
+    return (
+      <View key={msg.id} style={styles.userMessageRow}>
+        <View style={styles.userBubble}>
+          <Text style={styles.userText}>{msg.text}</Text>
+        </View>
+        <Text style={styles.timestampRight}>{msg.timestamp}</Text>
+      </View>
+    );
+  };
+
   const renderTypingIndicator = () => {
     if (!isLoading) return null;
     return (
-      <View style={{ paddingHorizontal: 20, marginBottom: 16, alignItems: 'flex-start' }}>
-        <View style={{
-          backgroundColor: colors.surface,
-          paddingHorizontal: 14,
-          paddingVertical: 10, // Gives it a nice bubble shape
-          borderRadius: 18,
-        }}>
-          <ActivityIndicator size="small" color={colors.primary} />
+      <View style={styles.botMessageRow}>
+        <View style={styles.botAvatarSmall}>
+            <MaterialCommunityIcons name="robot" size={16} color={THEME.primary} />
+        </View>
+        <View style={styles.typingBubble}>
+          <ActivityIndicator size="small" color={THEME.primary} />
         </View>
       </View>
     );
@@ -294,125 +304,353 @@ const Coach = () => {
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      style={{ paddingHorizontal: 20, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border }}
+      style={styles.quickReplyContainer}
+      contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 10 }}
     >
       {quickReplies.map((reply, idx) => (
         <TouchableOpacity
           key={idx}
           onPress={() => setMessage(reply)}
-          style={{
-            backgroundColor: colors.surface,
-            borderRadius: 20,
-            paddingVertical: 8,
-            paddingHorizontal: 16,
-            borderWidth: 1,
-            borderColor: colors.border,
-            marginRight: 8,
-          }}
+          style={styles.quickReplyChip}
         >
-          <Text style={{ fontSize: 12, color: colors.secondary }}>{reply}</Text>
+          <Text style={styles.quickReplyText}>{reply}</Text>
         </TouchableOpacity>
       ))}
     </ScrollView>
   );
 
-  const renderInput = () => (
-    <View
-      style={{
-        paddingHorizontal: 20,
-        paddingVertical: 12,
-        paddingBottom: insets.bottom > 0 ? insets.bottom : 12,
-        backgroundColor: colors.surface,
-        borderTopWidth: 1,
-        borderTopColor: colors.border,
-      }}
-    >
-      <View
-        style={{
-          flexDirection: "row",
-          backgroundColor: colors.background,
-          borderRadius: 24,
-          paddingHorizontal: 16,
-          paddingVertical: 8,
-          borderWidth: 1,
-          borderColor: colors.border,
-          alignItems: "flex-end",
-        }}
-      >
-        <TextInput
-          style={{
-            flex: 1,
-            fontSize: 14,
-            color: colors.primary,
-            paddingVertical: 8, 
-            paddingTop: 8, 
-          }}
-          placeholder="Ask EcoBuddy anything..."
-          placeholderTextColor={colors.placeholder}
-          value={message}
-          onChangeText={setMessage}
-          multiline
-        />
-        <TouchableOpacity
-          // NEW: Disable button when no message or when loading
-          disabled={!message.trim() || isLoading}
-          onPress={handleSendMessage}
-          style={{
-            width: 36,
-            height: 36,
-            borderRadius: 18,
-            // NEW: Change color when disabled
-            backgroundColor: (message.trim() && !isLoading) ? colors.green : colors.surfaceVariant,
-            justifyContent: "center",
-            alignItems: "center",
-            marginLeft: 8,
-            bottom: 4, 
-          }}
-        >
-          <MaterialCommunityIcons
-            name="send"
-            size={18}
-            color={(message.trim() && !isLoading) ? "#fff" : colors.placeholder}
-          />
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: colors.background }}
+      style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 88 : 0} 
+      keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
     >
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
+      <StatusBar barStyle="dark-content" backgroundColor={THEME.surface} />
+      
+      {/* Top Header */}
       {renderHeader()}
 
       <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: 20 }}
-        showsVerticalScrollIndicator={false}
-        // NEW: Attach the ref here
         ref={scrollViewRef}
+        style={styles.chatContainer}
+        contentContainerStyle={{ paddingBottom: 40 }}
+        showsVerticalScrollIndicator={false}
       >
+        {/* Sticky-ish Insights at top of scroll */}
         {renderDailyTips()}
-        <View
-          style={{
-            height: 1,
-            backgroundColor: colors.border,
-            marginHorizontal: 20,
-            marginVertical: 8,
-          }}
-        />
-        {messages.map(renderMessage)}
         
-        {/* NEW: Add the typing indicator to the end of the list */}
-        {renderTypingIndicator()}
+        <View style={styles.divider}>
+           <Text style={styles.dividerText}>Today</Text>
+        </View>
+
+        {/* Chat Messages */}
+        <View style={styles.messageList}>
+            {messages.map(renderMessage)}
+            {renderTypingIndicator()}
+        </View>
       </ScrollView>
 
-      {renderQuickReplies()}
-      {renderInput()}
+      {/* Input Area */}
+      <View style={[styles.inputWrapper, { paddingBottom: insets.bottom > 0 ? insets.bottom : 10 }]}>
+        {renderQuickReplies()}
+        
+        <View style={styles.inputBar}>
+          <TextInput
+            style={styles.textInput}
+            placeholder="Ask EcoBuddy..."
+            placeholderTextColor={THEME.textSecondary}
+            value={message}
+            onChangeText={setMessage}
+            multiline
+          />
+          <TouchableOpacity
+            disabled={!message.trim() || isLoading}
+            onPress={handleSendMessage}
+            style={[
+                styles.sendButton, 
+                { backgroundColor: (message.trim() && !isLoading) ? THEME.primary : THEME.border }
+            ]}
+          >
+            <MaterialCommunityIcons
+              name="arrow-up"
+              size={24}
+              color={(message.trim() && !isLoading) ? "#FFF" : "#FFF"}
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
     </KeyboardAvoidingView>
   );
-}; 
+};
+
+// --- STYLES (omitted for brevity, no changes) ---
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: THEME.background,
+  },
+  
+  // Header
+  header: {
+    backgroundColor: THEME.surface,
+    paddingHorizontal: 20,
+    paddingBottom: 15,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    ...THEME.shadow,
+    zIndex: 10,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatarContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: THEME.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: THEME.textMain,
+    letterSpacing: 0.5,
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#4CAF50',
+    marginRight: 6,
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    color: THEME.textSecondary,
+    fontWeight: '500',
+  },
+  iconButton: {
+    padding: 8,
+  },
+
+  // Insights
+  insightsContainer: {
+    paddingTop: 20,
+    paddingBottom: 10,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: THEME.textMain,
+    marginRight: 8,
+  },
+  tipCard: {
+    backgroundColor: THEME.surface,
+    width: 140,
+    height: 150,
+    borderRadius: 20,
+    padding: 12,
+    marginLeft: 20,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+    ...THEME.shadow,
+    justifyContent: 'space-between',
+  },
+  tipIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tipCategory: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: THEME.textSecondary,
+    marginTop: 8,
+    textTransform: 'uppercase',
+  },
+  tipText: {
+    fontSize: 13,
+    color: THEME.textMain,
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+
+  // Chat Layout
+  chatContainer: {
+    flex: 1,
+  },
+  divider: {
+    alignItems: 'center',
+    marginVertical: 16,
+  },
+  dividerText: {
+    fontSize: 12,
+    color: '#9E9E9E',
+    backgroundColor: '#E0E0E0',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  messageList: {
+    paddingHorizontal: 16,
+  },
+  
+  // Bot Messages
+  botMessageRow: {
+    flexDirection: 'row',
+    marginBottom: 20,
+    alignItems: 'flex-end',
+    maxWidth: '85%',
+  },
+  botAvatarSmall: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: THEME.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+    marginBottom: 18, // Align with text, not timestamp
+  },
+  botBubble: {
+    backgroundColor: THEME.surface,
+    padding: 16,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderBottomRightRadius: 18,
+    borderBottomLeftRadius: 4,
+    ...THEME.shadow,
+  },
+  botText: {
+    fontSize: 15,
+    color: THEME.textMain,
+    lineHeight: 22,
+  },
+  timestampLeft: {
+    fontSize: 11,
+    color: '#999',
+    marginTop: 4,
+    marginLeft: 4,
+  },
+
+  // User Messages
+  userMessageRow: {
+    alignSelf: 'flex-end',
+    marginBottom: 20,
+    alignItems: 'flex-end',
+    maxWidth: '80%',
+  },
+  userBubble: {
+    backgroundColor: THEME.primary,
+    padding: 16,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderBottomLeftRadius: 18,
+    borderBottomRightRadius: 4,
+    shadowColor: THEME.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  userText: {
+    fontSize: 15,
+    color: '#FFF',
+    lineHeight: 22,
+  },
+  timestampRight: {
+    fontSize: 11,
+    color: '#999',
+    marginTop: 4,
+    marginRight: 4,
+  },
+
+  // Typing Indicator
+  typingBubble: {
+    backgroundColor: THEME.surface,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderBottomRightRadius: 18,
+    borderBottomLeftRadius: 4,
+    ...THEME.shadow,
+  },
+
+  // Input Section
+  inputWrapper: {
+    backgroundColor: THEME.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  quickReplyContainer: {
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  quickReplyChip: {
+    backgroundColor: THEME.primaryLight,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(46, 125, 50, 0.1)',
+  },
+  quickReplyText: {
+    color: THEME.primary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  inputBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  textInput: {
+    flex: 1,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 12,
+    maxHeight: 100,
+    fontSize: 16,
+    color: THEME.textMain,
+    marginRight: 12,
+  },
+  sendButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});
+
 export default Coach;

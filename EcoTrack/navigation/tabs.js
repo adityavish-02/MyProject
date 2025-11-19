@@ -1,5 +1,5 @@
 import React from 'react';
-import { TouchableOpacity, Platform } from 'react-native';
+import { TouchableOpacity, Platform, View, StyleSheet, Text } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAppTheme } from "../android/app/utils/theme";
 
@@ -15,6 +15,41 @@ import Stats from '../screens/Stats';
 
 const Tab = createBottomTabNavigator();
 
+// Custom Tab Button Component - Updated Shape
+const CustomTabIcon = ({ focused, color, name, label }) => {
+  return (
+    <View style={{
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: 60, // Fixed width for stability
+    }}>
+      <View style={{
+        width: 44, // Slightly larger for the squircle shape
+        height: 44,
+        borderRadius: 14, // CHANGED: 14 creates a "Squircle" (Rounded Rectangle), 22 would be a Circle
+        // Show color background only when focused
+        backgroundColor: focused ? color : 'transparent', 
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 4,
+      }}>
+        <Icon 
+            name={name} 
+            size={22} 
+            color={focused ? '#FFFFFF' : '#9E9E9E'} // White icon when active, Gray when inactive
+        />
+      </View>
+      <Text style={{ 
+        color: focused ? color : '#9E9E9E', 
+        fontSize: 10, 
+        fontWeight: focused ? '700' : '500' 
+      }}>
+        {label}
+      </Text>
+    </View>
+  );
+};
+
 export default function TabLayout() {
   const { colors, isDark } = useAppTheme();
 
@@ -24,37 +59,38 @@ export default function TabLayout() {
         headerShown: true, 
         headerStyle: {
           backgroundColor: colors.background,
-          elevation: 0,
+          elevation: 0, 
           shadowOpacity: 0,
           borderBottomWidth: 1,
           borderBottomColor: colors.border,
         },
-        headerTintColor: colors.primary,
+        headerTintColor: colors.text || '#333',
         headerTitleAlign: 'center',
+        headerTitleStyle: {
+            fontWeight: 'bold',
+            fontSize: 18,
+        },
         headerLeft: () => (
           <TouchableOpacity
             onPress={() => navigation.openDrawer()} 
-            style={{ marginLeft: 20 }}
+            style={{ marginLeft: 20, padding: 4 }}
           >
-            {/* 2. 'menu' icon (Feather) */}
-            <Icon name="menu" size={26} color={colors.primary} />
+            <Icon name="menu" size={24} color={colors.text || '#333'} />
           </TouchableOpacity>
         ),
+        // --- STANDARD TAB BAR STYLES ---
+        tabBarShowLabel: false, // We handle labels inside CustomTabIcon for better control
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopWidth: 1,
           borderTopColor: colors.border,
-          paddingTop: 8,
-          paddingBottom: 4,
-          height: Platform.OS === 'ios' ? 90 : 70,
-        },
-        tabBarActiveTintColor: colors.green,
-        tabBarInactiveTintColor: colors.secondary,
-        tabBarShowLabel: true,
-        tabBarLabelStyle: {
-          fontSize: 10,
-          fontWeight: "500",
-          marginTop: 4,
+          height: Platform.OS === 'ios' ? 90 : 75, // Standard height
+          paddingTop: 10,
+          paddingBottom: Platform.OS === 'ios' ? 25 : 10,
+          elevation: 0, 
+          // Added top rounding for a smoother "sheet" look
+          borderTopLeftRadius: 20,
+          borderTopRightRadius: 20,
         },
       })}
     >
@@ -63,8 +99,14 @@ export default function TabLayout() {
         component={Dashboard}
         options={{
           title: "Dashboard",
-          // 3. Changed icon names to 'Feather'
-          tabBarIcon: ({ color }) => <Icon name="grid" color={color} size={24} />,
+          tabBarIcon: ({ focused }) => (
+            <CustomTabIcon 
+                focused={focused} 
+                name="grid" 
+                color="#42A5F5" // Blue
+                label="Home" 
+            />
+          ),
         }}
       />
       <Tab.Screen
@@ -72,7 +114,14 @@ export default function TabLayout() {
         component={Track}
         options={{
           title: "Track",
-          tabBarIcon: ({ color }) => <Icon name="plus-circle" color={color} size={24} />,
+          tabBarIcon: ({ focused }) => (
+            <CustomTabIcon 
+                focused={focused} 
+                name="plus-circle" 
+                color="#FFA726" // Orange
+                label="Track" 
+            />
+          ),
         }}
       />
       <Tab.Screen
@@ -80,7 +129,14 @@ export default function TabLayout() {
         component={Coach}
         options={{
           title: "EcoBuddy",
-          tabBarIcon: ({ color }) => <Icon name="message-circle" color={color} size={24} />, 
+          tabBarIcon: ({ focused }) => (
+            <CustomTabIcon 
+                focused={focused} 
+                name="message-circle" 
+                color="#66BB6A" // Green
+                label="Coach" 
+            />
+          ),
         }}
       />
       <Tab.Screen
@@ -88,7 +144,14 @@ export default function TabLayout() {
         component={Community}
         options={{
           title: "Community",
-          tabBarIcon: ({ color }) => <Icon name="users" color={color} size={24} />,
+          tabBarIcon: ({ focused }) => (
+            <CustomTabIcon 
+                focused={focused} 
+                name="users" 
+                color="#AB47BC" // Purple
+                label="Team" 
+            />
+          ),
         }}
       />
       <Tab.Screen
@@ -96,7 +159,14 @@ export default function TabLayout() {
         component={Stats}
         options={{
           title: "Stats",
-          tabBarIcon: ({ color }) => <Icon name="bar-chart-2" color={color} size={24} />,
+          tabBarIcon: ({ focused }) => (
+            <CustomTabIcon 
+                focused={focused} 
+                name="bar-chart-2" 
+                color="#EF5350" // Red
+                label="Stats" 
+            />
+          ),
         }}
       />
     </Tab.Navigator>
