@@ -11,6 +11,7 @@ import {
   StatusBar,
   ActivityIndicator,
   StyleSheet,
+  ToastAndroid, // <--- ADDED for quick error messages
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/Feather";
@@ -19,7 +20,32 @@ import Icon from "react-native-vector-icons/Feather";
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
-const TrackNative = () => {
+// --- ECOBUDDY INTELLIGENT TIPS ---
+const ECO_TIPS = {
+  travel: [
+    "Did you know? 🚗 Aggressive driving (speeding, rapid acceleration) can lower your gas mileage by up to 33%!",
+    "EcoBuddy Tip: Keeping your tires properly inflated can improve your gas mileage significantly.",
+    "Great job tracking! 🚌 Taking the bus instead of driving just once a week cuts your carbon footprint significantly.",
+    "Carpooling isn't just fun, it halves your emissions immediately! 🤝",
+    "EcoBuddy says: A roof rack with cargo increases aerodynamic drag and lowers fuel economy."
+  ],
+  energy: [
+    "Lightbulb moment! 💡 Switching to LED bulbs uses 75% less energy than incandescent lighting.",
+    "EcoBuddy Tip: Unplug electronics when not in use. 'Vampire power' accounts for 10% of home energy use!",
+    "Washing clothes in cold water saves huge amounts of energy used for heating. ❄️",
+    "Turn down your thermostat by just 1°C to save up to 10% on your energy bill.",
+    "Air drying clothes instead of using a dryer saves ~2.4kg of CO2 per load!"
+  ],
+  diet: [
+    "Yum! 🥦 Producing 1kg of beef emits 60kg of CO2, while peas emit just 1kg.",
+    "EcoBuddy Fact: Going meat-free just one day a week has a massive impact on water conservation.",
+    "Eating local ingredients reduces the 'Food Miles' (transport emissions) of your meal. 🚚",
+    "Food waste in landfills creates methane. Composting is a great way to fight this! 🍂",
+    "Did you know? Cheese has a high carbon footprint due to the dairy processing. Try vegan alternatives!"
+  ]
+};
+
+const Track = () => {
   const insets = useSafeAreaInsets();
   
   // --- State ---
@@ -28,35 +54,85 @@ const TrackNative = () => {
   const [isLoading, setIsLoading] = useState(false);
 
   const [travelData, setTravelData] = useState({ mode: "", distance: "", description: "" });
-  const [energyData, setEnergyData] = useState({ electricity: "", heating: "", description: "" });
+  const [energyData, setEnergyData] = useState({ electricity: "", description: "" });
   const [dietData, setDietData] = useState({ mealType: "", description: "" });
+
+  // --- BENCHMARKS (Averages to beat) ---
+  const AVG_TRAVEL_FACTOR = 0.20; // kg CO2 per km (Approx avg car)
+  const AVG_MEAL_EMISSION = 2.5;  // kg CO2 (Approx avg meat meal)
+  const AVG_ENERGY_EMISSION = 5.0; // kg CO2 (Arbitrary threshold for a small log)
+  const XP_REWARD = 50;
 
   // --- Authentication ---
   useEffect(() => {
     const subscriber = auth().onAuthStateChanged(onAuthStateChanged);
-    
     // Sign in anonymously if not logged in
     if (!auth().currentUser) {
       auth()
         .signInAnonymously()
         .catch(error => {
           console.error("Auth failed:", error);
-          Alert.alert("Auth Error", "Could not sign in anonymously.");
         });
     }
-
-    return subscriber; // unsubscribe on unmount
+    return subscriber; 
   }, []);
 
   function onAuthStateChanged(user) {
     setUser(user);
   }
 
+  // --- ECOBUDDY LOGIC ---
+  const showEcoBuddySuggestion = (category, emissions) => {
+    // 1. Get tips for the category
+    const tips = ECO_TIPS[category] || ["Every small step counts! Keep it up! 🌍"];
+    
+    // 2. Pick a random one
+    const randomTip = tips[Math.floor(Math.random() * tips.length)];
+
+    // 3. Show Alert (Forces user to read the coaching tip)
+    // We use Alert instead of Toast so the user actually reads the advice
+    Alert.alert(
+      "EcoBuddy 🤖 says:",
+      `"${randomTip}"\n\n(Logged: ${emissions}kg CO₂)`,
+      [{ text: "Thanks!", style: "default" }]
+    );
+  };
+
+  // --- Helper: Update XP ---
+  const awardXp = async () => {
+    if (!user) return;
+    try {
+      const userRef = firestore().collection('users').doc(user.uid);
+      // Use increment so we don't need to read the doc first
+      await userRef.update({
+        xp: firestore.FieldValue.increment(XP_REWARD)
+      });
+      
+      // Show confirmation alert only after XP update is successful
+      Alert.alert(
+        "Nice Work! 🌱",
+        `You beat the average! +${XP_REWARD} XP earned.\nKeep it up!`
+      );
+    } catch (error) {
+      console.error("Error updating XP", error);
+      // Fallback: create doc and award XP if it didn't exist
+      await firestore().collection('users').doc(user.uid).set({
+          xp: XP_REWARD,
+          level: 1
+      }, { merge: true });
+
+       Alert.alert(
+        "Nice Work! 🌱",
+        `You beat the average! +${XP_REWARD} XP earned.\nKeep it up!`
+      );
+    }
+  };
+
   // --- Data Constants ---
   const travelModes = [
     { id: "car", label: "Car", icon: "truck", factor: 0.21 },
     { id: "bus", label: "Bus", icon: "map-pin", factor: 0.089 },
-    { id: "bike", label: "Bike", icon: "wind", factor: 0 }, // Feather doesn't have 'bike', using 'wind'
+    { id: "bike", label: "Bike", icon: "wind", factor: 0 },
     { id: "walk", label: "Walk", icon: "activity", factor: 0 },
     { id: "airplane", label: "Plane", icon: "send", factor: 0.255 },
   ];
@@ -72,18 +148,22 @@ const TrackNative = () => {
   const calculateTravelEmissions = () => {
     if (!travelData.mode || !travelData.distance) return 0;
     const mode = travelModes.find((m) => m.id === travelData.mode);
-    return (parseFloat(travelData.distance) * mode.factor).toFixed(2);
+    return (parseFloat(travelData.distance || 0) * mode.factor).toFixed(2);
   };
 
   // --- Handlers ---
   const handleSaveTravel = async () => {
-    if (!user) return Alert.alert("Please wait", "Logging in...");
+    if (!user) return Alert.alert("Please wait", "Authenticating...");
     if (!travelData.mode || !travelData.distance) {
-      return Alert.alert("Missing Data", "Select a transport mode and enter distance.");
+      return ToastAndroid.show("Select a transport mode and enter distance.", ToastAndroid.SHORT);
     }
 
     setIsLoading(true);
-    const emissions = calculateTravelEmissions();
+    const emissions = parseFloat(calculateTravelEmissions());
+    const distance = parseFloat(travelData.distance || 0);
+    
+    // Safety check for division by zero
+    const emissionPerKm = (distance > 0) ? (emissions / distance) : (travelData.mode === 'car' ? 0.21 : 0);
 
     try {
       await firestore()
@@ -93,12 +173,19 @@ const TrackNative = () => {
         .add({
           userId: user.uid,
           mode: travelData.mode,
-          distance: parseFloat(travelData.distance),
-          emissions: parseFloat(emissions),
+          distance: distance,
+          emissions: emissions,
           createdAt: firestore.FieldValue.serverTimestamp(),
         });
 
-      Alert.alert("Travel Logged!", `${emissions} kg CO₂ added.`);
+      // Check if better than average
+      if (emissionPerKm < AVG_TRAVEL_FACTOR) {
+        await awardXp();
+      } else {
+        // TRIGGER ECOBUDDY
+        showEcoBuddySuggestion('travel', emissions.toFixed(2));
+      }
+
       setTravelData({ mode: "", distance: "", description: "" });
     } catch (error) {
       console.error("Error saving travel log: ", error);
@@ -109,13 +196,17 @@ const TrackNative = () => {
   };
 
   const handleSaveEnergy = async () => {
-    if (!user) return Alert.alert("Please wait", "Logging in...");
-    if (!energyData.electricity && !energyData.heating) {
-      return Alert.alert("Missing Data", "Please enter electricity or heating usage.");
+    if (!user) return Alert.alert("Please wait", "Authenticating...");
+    
+    // Ensure inputs are parsed safely
+    const electricity = parseFloat(energyData.electricity || 0);
+    
+    if (electricity === 0 ) {
+      return ToastAndroid.show("Please enter electricity usage.", ToastAndroid.SHORT);
     }
 
     setIsLoading(true);
-    const emissions = (parseFloat(energyData.electricity || 0) * 0.5) + (parseFloat(energyData.heating || 0) * 0.2);
+    const emissions = (electricity * 0.82);
 
     try {
       await firestore()
@@ -124,14 +215,20 @@ const TrackNative = () => {
         .collection('energy_logs')
         .add({
           userId: user.uid,
-          electricity: parseFloat(energyData.electricity || 0),
-          heating: parseFloat(energyData.heating || 0),
+          electricity: electricity,
           emissions: emissions,
           createdAt: firestore.FieldValue.serverTimestamp(),
         });
 
-      Alert.alert("Energy Logged!", "Your energy usage has been saved.");
-      setEnergyData({ electricity: "", heating: "", description: "" });
+      // After successful log, check for XP reward
+      if (emissions < AVG_ENERGY_EMISSION) {
+        await awardXp();
+      } else {
+        // TRIGGER ECOBUDDY
+        showEcoBuddySuggestion('energy', emissions.toFixed(2));
+      }
+      
+      setEnergyData({ electricity: "",  description: "" });
     } catch (error) {
       console.error("Error saving energy log: ", error);
       Alert.alert("Error", "Could not save log.");
@@ -141,9 +238,9 @@ const TrackNative = () => {
   };
 
   const handleSaveDiet = async () => {
-    if (!user) return Alert.alert("Please wait", "Logging in...");
+    if (!user) return Alert.alert("Please wait", "Authenticating...");
     if (!dietData.mealType) {
-      return Alert.alert("Missing Data", "Please select a meal type.");
+      return ToastAndroid.show("Please select a meal type.", ToastAndroid.SHORT);
     }
 
     const meal = mealTypes.find((m) => m.id === dietData.mealType);
@@ -163,7 +260,14 @@ const TrackNative = () => {
           createdAt: firestore.FieldValue.serverTimestamp(),
         });
 
-      Alert.alert("Meal Logged!", `${meal.co2} kg CO₂ added.`);
+      // After successful log, check for XP reward
+      if (meal.co2 < AVG_MEAL_EMISSION) {
+        await awardXp();
+      } else {
+        // TRIGGER ECOBUDDY
+        showEcoBuddySuggestion('diet', meal.co2);
+      }
+
       setDietData({ mealType: "", description: "" });
     } catch (error) {
       console.error("Error saving diet log: ", error);
@@ -270,18 +374,6 @@ const TrackNative = () => {
         placeholderTextColor="#94a3b8"
       />
 
-      <Text style={styles.inputLabel}>
-        <Icon name="home" size={16} color="#60A5FA" /> Heating/Cooling (kWh)
-      </Text>
-      <TextInput
-        placeholder="0.0"
-        keyboardType="numeric"
-        value={energyData.heating}
-        onChangeText={(t) => setEnergyData({ ...energyData, heating: t })}
-        style={styles.input}
-        placeholderTextColor="#94a3b8"
-      />
-
       <TouchableOpacity
         onPress={handleSaveEnergy}
         disabled={isLoading}
@@ -347,12 +439,6 @@ const TrackNative = () => {
         {activeTab === "energy" && renderEnergyTab()}
         {activeTab === "diet" && renderDietTab()}
       </ScrollView>
-      
-      {!user && (
-        <View style={styles.footerAuth}>
-          <Text style={styles.footerAuthText}>Authenticating...</Text>
-        </View>
-      )}
     </KeyboardAvoidingView>
   );
 };
@@ -545,19 +631,6 @@ const styles = StyleSheet.create({
     color: "#94a3b8",
     fontSize: 14,
   },
-  footerAuth: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#FEF3C7',
-    padding: 4,
-    alignItems: 'center',
-  },
-  footerAuthText: {
-    color: '#92400E',
-    fontSize: 12,
-  },
 });
 
-export default TrackNative;
+export default Track;

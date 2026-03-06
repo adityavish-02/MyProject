@@ -9,6 +9,7 @@ import { getAuth, onAuthStateChanged, signOut } from '@react-native-firebase/aut
 import MainAppNavigator from './MainAppNavigator.jsx'; 
 import AuthScreen from './screens/AuthScreen.jsx'; 
 
+
 const Stack = createStackNavigator();
 
 // 2. GET the auth instance once
@@ -17,6 +18,9 @@ const auth = getAuth();
 const App = () => {
   const [user, setUser] = useState(null);
   const [initializing, setInitializing] = useState(true);
+
+  const [notifVisible, setNotifVisible] = useState(false);
+const [notifText, setNotifText] = useState("");
 
   useEffect(() => {
     // 3. USE the new onAuthStateChanged syntax

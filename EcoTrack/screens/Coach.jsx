@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from "react"; 
+import React, { useState, useRef, useEffect } from "react";
+import { Snackbar } from "react-native-paper";
 import {
   View,
   Text,
@@ -19,9 +20,43 @@ import axios from 'axios';
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 
+// --- TEMP USER DATA (replace later with your real tracking data) ---
+const USER_DATA = {
+  travel: {
+    dailyKm: 12,
+    mode: "bike",
+    busUse: "medium"
+  },
+  food: {
+    diet: "non-veg",
+    weeklyChicken: 3
+  },
+  energy: {
+    electricity: 180,
+    lpgYearly: 7
+  }
+};
+
+const SYSTEM_PROMPT = `
+You are EcoBuddy — a personalised carbon footprint reduction coach.
+
+Here is the user's real data:
+{{USER_DATA}}
+
+Rules:
+- Give specific, personalised suggestions.
+- No generic advice.
+- Keep tips achievable in India.
+- Use small emojis 🌱🌍.
+- Show numbers (e.g., "save 0.4kg CO₂/day").
+- Consider their travel, food, energy, and shopping habits.
+- Always stay friendly and encouraging.
+`;
+
+
 // --- CONFIGURATION ---
 // WARNING: In a production app, restrict this key in Google Cloud Console to your Android/iOS bundle IDs.
-const GEMINI_API_KEY = "AIzaSyD9RoOMRoqbhHgVRRyUf7nwR0W3677OMm0"; // Your key
+const GEMINI_API_KEY = "AIzaSyAPKPMiher8b0eDn_yjG47FkPF5H75FmiQ"; // Your key
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
 
 // Define the bot's persona (System Instruction)
@@ -50,11 +85,11 @@ const THEME = {
 const Coach = ({ user, onLogout }) => {
   const insets = useSafeAreaInsets();
   const scrollViewRef = useRef();
-  
+
   // State Management
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
-  
+
   // Initial Chat Data & History
   const [messages, setMessages] = useState([
     {
@@ -62,14 +97,14 @@ const Coach = ({ user, onLogout }) => {
       text: "Hello Sarah! 🌱 I'm EcoBuddy. Ready to make today greener?",
       isBot: true,
       timestamp: "9:30 AM",
-      role: 'model', 
+      role: 'model',
     },
     {
       id: 2,
       text: "You've saved 4.2 kg CO₂ today! That's like planting 2 trees. 🌳",
       isBot: true,
       timestamp: "9:30 AM",
-      role: 'model', 
+      role: 'model',
     },
   ]);
 
@@ -111,7 +146,7 @@ const Coach = ({ user, onLogout }) => {
   const scrollToBottom = () => {
     // Only scroll after state update triggers rendering
     setTimeout(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: true });
+      scrollViewRef.current?.scrollToEnd({ animated: true });
     }, 100);
   };
 
@@ -127,43 +162,40 @@ const Coach = ({ user, onLogout }) => {
         hour: "numeric",
         minute: "2-digit",
       }),
-      role: 'user', 
+      role: "user",
     };
 
-    // 1. Add user message immediately to UI and local history
+    // Add user message
     setMessages((prev) => [...prev, userMessage]);
     setMessage("");
     setIsLoading(true);
-    // Scroll now to show the input bubble
     scrollToBottom();
 
     try {
-      // --- REGRESSION WARNING ---
-      // This simplified structure only sends the current message and loses all conversational context.
-      // The ECOBUDDY_PERSONA is also currently unused as 'generationConfig' is removed.
-      
+      // --- PERSONALIZED API CALL ---
       const response = await axios({
         url: GEMINI_URL,
         method: "post",
         data: {
           contents: [
             {
-              parts: [
-                {
-                  text: userMessage.text // Only sends the current question
-                }
-              ]
+              role: "user",
+              parts: [{
+                text:
+                  SYSTEM_PROMPT.replace("{{USER_DATA}}", JSON.stringify(USER_DATA, null, 2)) +
+                  "\n\nConversation so far:\n" +
+                  messages.map(m => `${m.role}: ${m.text}`).join("\n") +
+                  `\n\nUser: ${userMessage.text}`
+              }]
             }
           ]
         }
+
       });
 
-      // 4. Parse the specific Gemini Response structure
       const botReply = response?.data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
-      if (!botReply) {
-         throw new Error("Gemini returned an empty or malformed response.");
-      }
+      if (!botReply) throw new Error("Empty Gemini response.");
 
       const botMessage = {
         id: Date.now() + 1,
@@ -173,46 +205,28 @@ const Coach = ({ user, onLogout }) => {
           hour: "numeric",
           minute: "2-digit",
         }),
-        role: 'model', // Added role
+        role: "model",
       };
-      
-      // 5. Add bot message to state
-      setMessages((prev) => [...prev, botMessage]);
 
+      setMessages((prev) => [...prev, botMessage]);
     } catch (error) {
-      
-      // --- START OF IMPROVED ERROR LOGGING ---
-      console.error("--- GEMINI REQUEST FAILED ---");
-      console.error("HTTP Status:", error.response?.status);
-      console.error("Response Data:", error.response?.data);
-      console.error("Axios Message:", error.message);
-      
-      let errorMessageText = "I'm having trouble connecting to the nature grid. 🍃 Please check your internet connection or API key status.";
-      
-      if (error.response?.data?.error?.message) {
-         // Use the specific message provided by the Gemini API
-         errorMessageText = `API Error: ${error.response.data.error.message}`;
-      } else if (error.response?.status === 400) {
-         errorMessageText = "Request Error (400): Malformed data sent to the API. Check your 'contents' array structure.";
-      } else if (error.response?.status === 403) {
-         errorMessageText = "Authentication Error (403): API key is invalid or restricted. Check your key!";
-      }
-      // --- END OF IMPROVED ERROR LOGGING ---
+      console.error("Gemini Error:", error);
 
       const errorMessage = {
         id: Date.now() + 2,
-        text: errorMessageText,
+        text: "⚠️ EcoBuddy is having trouble connecting. Please check your API key or network.",
         isBot: true,
         timestamp: new Date().toLocaleTimeString("en-US", {
           hour: "numeric",
           minute: "2-digit",
         }),
-        role: 'model',
+        role: "model",
       };
+
       setMessages((prev) => [...prev, errorMessage]);
+
     } finally {
       setIsLoading(false);
-      // Final scroll to ensure typing indicator and response are visible
       scrollToBottom();
     }
   };
@@ -245,7 +259,7 @@ const Coach = ({ user, onLogout }) => {
         <Text style={styles.sectionTitle}>Daily Insights</Text>
         <MaterialCommunityIcons name="lightbulb-on-outline" size={20} color={THEME.accent} />
       </View>
-      
+
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 20 }}>
         {dailyTips.map((tip) => (
           <TouchableOpacity key={tip.id} style={styles.tipCard}>
@@ -264,15 +278,15 @@ const Coach = ({ user, onLogout }) => {
     if (msg.isBot) {
       return (
         <View key={msg.id} style={styles.botMessageRow}>
-            <View style={styles.botAvatarSmall}>
-                <MaterialCommunityIcons name="robot" size={16} color={THEME.primary} />
+          <View style={styles.botAvatarSmall}>
+            <MaterialCommunityIcons name="robot" size={16} color={THEME.primary} />
+          </View>
+          <View>
+            <View style={styles.botBubble}>
+              <Text style={styles.botText}>{msg.text}</Text>
             </View>
-            <View>
-                <View style={styles.botBubble}>
-                    <Text style={styles.botText}>{msg.text}</Text>
-                </View>
-                <Text style={styles.timestampLeft}>{msg.timestamp}</Text>
-            </View>
+            <Text style={styles.timestampLeft}>{msg.timestamp}</Text>
+          </View>
         </View>
       );
     }
@@ -291,7 +305,7 @@ const Coach = ({ user, onLogout }) => {
     return (
       <View style={styles.botMessageRow}>
         <View style={styles.botAvatarSmall}>
-            <MaterialCommunityIcons name="robot" size={16} color={THEME.primary} />
+          <MaterialCommunityIcons name="robot" size={16} color={THEME.primary} />
         </View>
         <View style={styles.typingBubble}>
           <ActivityIndicator size="small" color={THEME.primary} />
@@ -326,7 +340,7 @@ const Coach = ({ user, onLogout }) => {
       keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
     >
       <StatusBar barStyle="dark-content" backgroundColor={THEME.surface} />
-      
+
       {/* Top Header */}
       {renderHeader()}
 
@@ -338,22 +352,22 @@ const Coach = ({ user, onLogout }) => {
       >
         {/* Sticky-ish Insights at top of scroll */}
         {renderDailyTips()}
-        
+
         <View style={styles.divider}>
-           <Text style={styles.dividerText}>Today</Text>
+          <Text style={styles.dividerText}>Today</Text>
         </View>
 
         {/* Chat Messages */}
         <View style={styles.messageList}>
-            {messages.map(renderMessage)}
-            {renderTypingIndicator()}
+          {messages.map(renderMessage)}
+          {renderTypingIndicator()}
         </View>
       </ScrollView>
 
       {/* Input Area */}
       <View style={[styles.inputWrapper, { paddingBottom: insets.bottom > 0 ? insets.bottom : 10 }]}>
         {renderQuickReplies()}
-        
+
         <View style={styles.inputBar}>
           <TextInput
             style={styles.textInput}
@@ -367,8 +381,8 @@ const Coach = ({ user, onLogout }) => {
             disabled={!message.trim() || isLoading}
             onPress={handleSendMessage}
             style={[
-                styles.sendButton, 
-                { backgroundColor: (message.trim() && !isLoading) ? THEME.primary : THEME.border }
+              styles.sendButton,
+              { backgroundColor: (message.trim() && !isLoading) ? THEME.primary : THEME.border }
             ]}
           >
             <MaterialCommunityIcons
@@ -389,7 +403,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: THEME.background,
   },
-  
+
   // Header
   header: {
     backgroundColor: THEME.surface,
@@ -514,7 +528,7 @@ const styles = StyleSheet.create({
   messageList: {
     paddingHorizontal: 16,
   },
-  
+
   // Bot Messages
   botMessageRow: {
     flexDirection: 'row',

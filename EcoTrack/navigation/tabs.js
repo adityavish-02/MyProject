@@ -149,7 +149,7 @@ export default function TabLayout() {
                 focused={focused} 
                 name="users" 
                 color="#AB47BC" // Purple
-                label="Team" 
+                label="Community" 
             />
           ),
         }}
