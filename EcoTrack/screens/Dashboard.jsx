@@ -36,7 +36,7 @@ const Dashboard = ({ navigation }) => {
 
   // Main Dashboard Data Structure, now includes live XP and Footprint
   const [dashboardData, setDashboardData] = useState({
-    name: "Sarah", 
+    name: "TestUser", 
     level: 1,
     xp: 0,
     xpToNext: 500,

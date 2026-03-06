@@ -1,0 +1,49 @@
+workflows:
+  release-build:
+    name: React Native Release Build
+    instance_type: mac_mini_m2 # Fast Apple Silicon machine
+    max_build_duration: 60
+    
+    # 1. ENVIRONMENT SETUP
+    environment:
+      # Use Node.js for React Native
+      node: latest
+      # You will import secret credentials here later (Keystore, Apple API key)
+      groups:
+        - android_signing
+        - apple_credentials
+
+    # 2. SCRIPTS (The Build Logic)
+    scripts:
+      - name: Install Dependencies
+        script: |
+          npm install
+          (cd ios && pod install)
+
+      - name: Build Android App Bundle (AAB)
+        script: |
+          # The Android build script for release
+          ./gradlew bundleRelease
+
+      - name: Build iOS Archive
+        script: |
+          # The iOS build script
+          xcode-project build-ipa --workspace $CM_WORKSPACE/ios/YourProject.xcworkspace --scheme YourProject --configuration Release
+
+    # 3. ARTIFACTS (What to save)
+    artifacts:
+      - android/app/build/outputs/bundle//*.aab
+      - build/ios/ipa/*.ipa
+
+    # 4. PUBLISHING (The quick demo step!)
+    # This is the easiest way to give judges a link directly.
+    publishing:
+      # You can upload the .aab to Google Play Internal Test Track here
+      # You can upload the .ipa to TestFlight Internal Test Track here
+      
+      # *** Quickest Demo Method: Email Distribution ***
+      email:
+        recipients:
+          - "judge1@example.com"
+          - "judge2@example.com"
+        # The email will contain the download links for the .aab and .ipa files.
